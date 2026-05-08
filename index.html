@@ -1,1 +1,466 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>WVL Agent Builder</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#09090f;color:#fff;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:#111}
+::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+input,textarea{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;padding:10px 14px;border-radius:8px;width:100%;font-family:inherit;font-size:14px;outline:none;transition:border-color .15s}
+input:focus,textarea:focus{border-color:rgba(245,158,11,0.5)}
+input::placeholder,textarea::placeholder{color:rgba(255,255,255,0.25)}
+textarea{resize:vertical;min-height:80px;line-height:1.5}
+button{cursor:pointer;font-family:inherit;transition:all .15s}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fade{animation:fadeIn .25s ease}
+.spinner{display:inline-block;width:36px;height:36px;border:3px solid rgba(245,158,11,0.2);border-top:3px solid #F59E0B;border-radius:50%;animation:spin .8s linear infinite}
+.card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:14px}
+.field-label{display:block;font-size:12px;font-weight:600;color:rgba(255,255,255,0.5);margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase}
+.field-hint{font-size:12px;color:rgba(255,255,255,0.3);margin-bottom:8px}
+.btn-primary{padding:11px 22px;border-radius:8px;font-size:14px;font-weight:600;background:#F59E0B;color:#000;border:none}
+.btn-primary:hover{background:#FBBF24}
+.btn-primary:disabled{background:rgba(245,158,11,0.2);color:rgba(245,158,11,0.4);cursor:not-allowed}
+.btn-secondary{padding:11px 22px;border-radius:8px;font-size:14px;background:transparent;color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.12)}
+.btn-secondary:hover{background:rgba(255,255,255,0.05)}
+.tag{padding:6px 14px;border-radius:20px;font-size:12px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:rgba(255,255,255,0.5)}
+.tag.active{border:1.5px solid #F59E0B;background:rgba(245,158,11,0.15);color:#F59E0B}
+.result-box{background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 16px;max-height:440px;overflow-y:auto;font-size:13px;line-height:1.8;color:rgba(255,255,255,0.8);white-space:pre-wrap;font-family:'Courier New',monospace}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const A = '#F59E0B';
+const REDES = ['Instagram','TikTok','WhatsApp','Facebook','YouTube','LinkedIn'];
+const STEPS = ['🏢 Negócio','📦 Produtos','👥 Público','🗣️ Tom de Voz','🎯 Objetivos'];
 
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  if (attrs) Object.entries(attrs).forEach(([k,v]) => {
+    if (k === 'style' && typeof v === 'object') Object.assign(e.style, v);
+    else if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(), v);
+    else e.setAttribute(k, v);
+  });
+  children.flat().forEach(c => c != null && e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+  return e;
+}
+
+function mount(component) {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  app.appendChild(component());
+}
+
+// ---- STATE ----
+let apiKey = localStorage.getItem('wvl_key') || '';
+let clients = [];
+try { clients = JSON.parse(localStorage.getItem('wvl_clients') || '[]'); } catch(e) {}
+let currentView = 'dashboard';
+let selectedClient = null;
+let formData = {};
+let currentStep = 0;
+
+function saveClients() { localStorage.setItem('wvl_clients', JSON.stringify(clients)); }
+
+// ---- VIEWS ----
+function renderApp() {
+  if (!apiKey) { mount(viewApiSetup); return; }
+  if (currentView === 'new') { mount(viewNewClient); return; }
+  if (currentView === 'detail' && selectedClient) { mount(viewDetail); return; }
+  mount(viewDashboard);
+}
+
+// API SETUP
+function viewApiSetup() {
+  let keyVal = '';
+  let show = false;
+
+  const wrap = el('div', {style:{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}});
+  const card = el('div', {class:'card', style:{maxWidth:'480px',width:'100%',padding:'40px 32px',textAlign:'center'}});
+
+  const icon = el('div', {style:{fontSize:'40px',marginBottom:'16px'}}, '🔑');
+  const title = el('h1', {style:{fontSize:'22px',fontWeight:'700',marginBottom:'8px'}}, 'Configurar API Key');
+  const desc = el('p', {style:{fontSize:'14px',color:'rgba(255,255,255,0.4)',marginBottom:'28px',lineHeight:'1.6'}},
+    'Para gerar agentes com IA, você precisa de uma API Key da Anthropic. ');
+  const link = el('a', {href:'https://console.anthropic.com',target:'_blank',style:{color:A}}, 'Criar chave gratuita →');
+  desc.appendChild(link);
+
+  const inputWrap = el('div', {style:{position:'relative',marginBottom:'16px'}});
+  const inp = el('input', {type:'password',placeholder:'sk-ant-api03-...'});
+  inp.addEventListener('input', e => keyVal = e.target.value);
+
+  const eye = el('button', {style:{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:'rgba(255,255,255,0.4)',fontSize:'16px',cursor:'pointer'}}, '👁️');
+  eye.addEventListener('click', () => { show=!show; inp.type=show?'text':'password'; eye.textContent=show?'🙈':'👁️'; });
+  inputWrap.append(inp, eye);
+
+  const btn = el('button', {class:'btn-primary', style:{width:'100%',padding:'12px'}}, 'Salvar e continuar →');
+  btn.addEventListener('click', () => {
+    if (keyVal.startsWith('sk-')) {
+      apiKey = keyVal;
+      localStorage.setItem('wvl_key', apiKey);
+      currentView = 'dashboard';
+      renderApp();
+    } else {
+      alert('Chave inválida. Deve começar com sk-');
+    }
+  });
+
+  const note = el('p', {style:{fontSize:'11px',color:'rgba(255,255,255,0.2)',marginTop:'16px'}}, 'Sua chave fica salva apenas neste navegador');
+  card.append(icon, title, desc, inputWrap, btn, note);
+  wrap.appendChild(card);
+  return wrap;
+}
+
+// DASHBOARD
+function viewDashboard() {
+  const wrap = el('div', {style:{maxWidth:'900px',margin:'0 auto',padding:'32px 20px'}});
+
+  const header = el('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'40px',flexWrap:'wrap',gap:'12px'}});
+  const left = el('div', {});
+  const badge = el('div', {style:{display:'inline-flex',alignItems:'center',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.2)',borderRadius:'20px',padding:'4px 14px',marginBottom:'10px'}},
+    el('span', {style:{fontSize:'11px',color:A,fontWeight:'700',letterSpacing:'0.1em'}}, 'WVL PRODUTORA'));
+  const h1 = el('h1', {style:{fontSize:'26px',fontWeight:'700',letterSpacing:'-0.02em'}}, 'Agent Builder');
+  const sub = el('p', {style:{fontSize:'14px',color:'rgba(255,255,255,0.4)',marginTop:'4px'}},
+    clients.length + ' cliente' + (clients.length!==1?'s':'') + ' cadastrado' + (clients.length!==1?'s':''));
+  left.append(badge, h1, sub);
+
+  const right = el('div', {style:{display:'flex',gap:'8px',alignItems:'center'}});
+  const btnKey = el('button', {style:{background:'none',border:'1px solid rgba(255,255,255,0.1)',color:'rgba(255,255,255,0.3)',borderRadius:'8px',padding:'8px 14px',fontSize:'12px'}}, '⚙️ API Key');
+  btnKey.addEventListener('click', () => { localStorage.removeItem('wvl_key'); apiKey=''; renderApp(); });
+  const btnNew = el('button', {class:'btn-primary',style:{padding:'10px 20px'}}, '+ Novo cliente');
+  btnNew.addEventListener('click', () => { currentView='new'; formData={}; currentStep=0; renderApp(); });
+  right.append(btnKey, btnNew);
+  header.append(left, right);
+  wrap.appendChild(header);
+
+  if (clients.length === 0) {
+    const empty = el('div', {class:'card',style:{padding:'60px 32px',textAlign:'center'}});
+    empty.append(
+      el('div', {style:{fontSize:'48px',marginBottom:'16px'}}, '🤖'),
+      el('h2', {style:{fontSize:'18px',fontWeight:'600',marginBottom:'8px'}}, 'Nenhum cliente ainda'),
+      el('p', {style:{fontSize:'14px',color:'rgba(255,255,255,0.4)',marginBottom:'24px'}}, 'Crie o primeiro agente e veja a mágica acontecer')
+    );
+    const b = el('button', {class:'btn-primary'}, 'Criar primeiro agente');
+    b.addEventListener('click', () => { currentView='new'; formData={}; currentStep=0; renderApp(); });
+    empty.appendChild(b);
+    wrap.appendChild(empty);
+  } else {
+    const grid = el('div', {style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:'14px'}});
+    clients.forEach(c => {
+      const card = el('div', {class:'card',style:{padding:'20px',cursor:'pointer'}});
+      card.addEventListener('mouseenter', () => card.style.borderColor='rgba(245,158,11,0.3)');
+      card.addEventListener('mouseleave', () => card.style.borderColor='rgba(255,255,255,0.08)');
+
+      const seg = (c.data.segmento||'').toLowerCase();
+      const ico = seg.includes('ali')||seg.includes('empad')||seg.includes('food')?'🍽️':seg.includes('bel')||seg.includes('est')?'💅':seg.includes('pet')?'🐾':'🏢';
+
+      const top = el('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'12px'}});
+      const avatar = el('div', {style:{width:'40px',height:'40px',borderRadius:'10px',background:'rgba(245,158,11,0.15)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px'}}, ico);
+      const del = el('button', {style:{background:'none',border:'none',color:'rgba(255,255,255,0.2)',fontSize:'16px',padding:'4px'}}, '✕');
+      del.addEventListener('click', e => { e.stopPropagation(); if(confirm('Remover '+c.data.nome+'?')){clients=clients.filter(x=>x.id!==c.id);saveClients();renderApp();} });
+      top.append(avatar, del);
+
+      const name = el('h3', {style:{fontSize:'15px',fontWeight:'600',marginBottom:'4px'}}, c.data.nome||'Sem nome');
+      const segEl = el('p', {style:{fontSize:'12px',color:'rgba(255,255,255,0.4)',marginBottom:'12px'}}, c.data.segmento||'Segmento não definido');
+      const bottom = el('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center'}});
+      const date = el('span', {style:{fontSize:'11px',color:'rgba(255,255,255,0.25)'}}, new Date(c.createdAt).toLocaleDateString('pt-BR'));
+      const viewBtn = el('button', {style:{background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.2)',color:A,borderRadius:'6px',padding:'4px 12px',fontSize:'12px'}}, 'Ver agente →');
+      viewBtn.addEventListener('click', () => { selectedClient=c; currentView='detail'; renderApp(); });
+      bottom.append(date, viewBtn);
+      card.append(top, name, segEl, bottom);
+      grid.appendChild(card);
+    });
+    wrap.appendChild(grid);
+  }
+
+  const footer = el('p', {style:{textAlign:'center',marginTop:'40px',fontSize:'11px',color:'rgba(255,255,255,0.15)',letterSpacing:'0.06em'}}, 'WVL PRODUTORA — AGENT BUILDER v1.0');
+  wrap.appendChild(footer);
+  return wrap;
+}
+
+// NEW CLIENT FORM
+function viewNewClient() {
+  if (!formData.redes) formData.redes = [];
+
+  const wrap = el('div', {class:'fade',style:{maxWidth:'660px',margin:'0 auto',padding:'32px 20px'}});
+
+  const back = el('button', {class:'btn-secondary',style:{marginBottom:'24px',display:'inline-flex',alignItems:'center',gap:'6px',padding:'8px 16px'}}, '← Voltar');
+  back.addEventListener('click', () => { currentView='dashboard'; renderApp(); });
+  wrap.appendChild(back);
+
+  // Stepper
+  const stepper = el('div', {style:{display:'flex',alignItems:'center',marginBottom:'32px',overflowX:'auto',paddingBottom:'4px',gap:'0'}});
+  STEPS.forEach((s,i) => {
+    const active = currentStep===i;
+    const done = i<currentStep;
+    const step = el('div', {style:{
+      display:'flex',flexDirection:'column',alignItems:'center',gap:'3px',
+      padding:'6px 10px',borderRadius:'8px',minWidth:'64px',flexShrink:'0',
+      background:active?'rgba(245,158,11,0.1)':'transparent',
+      border:active?'1px solid rgba(245,158,11,0.25)':'1px solid transparent',
+      cursor:done?'pointer':'default'
+    }});
+    const icon = el('span',{style:{fontSize:'18px'}}, s.split(' ')[0]);
+    const label = el('span',{style:{fontSize:'10px',fontWeight:'600',letterSpacing:'0.04em',color:active?A:done?'rgba(255,255,255,0.45)':'rgba(255,255,255,0.2)'}}, s.split(' ').slice(1).join(' '));
+    step.append(icon, label);
+    if (done) step.addEventListener('click', () => { currentStep=i; renderApp(); });
+    stepper.appendChild(step);
+    if (i < STEPS.length-1) {
+      const line = el('div',{style:{flex:'1',height:'1px',background:done?'rgba(245,158,11,0.35)':'rgba(255,255,255,0.08)',minWidth:'12px'}});
+      stepper.appendChild(line);
+    }
+  });
+  wrap.appendChild(stepper);
+
+  const card = el('div',{class:'card fade',style:{padding:'28px 24px'}});
+
+  function field(label, hint, inputEl) {
+    const f = el('div',{style:{marginBottom:'20px'}});
+    f.appendChild(el('label',{class:'field-label'},label));
+    if(hint) f.appendChild(el('p',{class:'field-hint'},hint));
+    f.appendChild(inputEl);
+    return f;
+  }
+  function inp(key, placeholder, val) {
+    const i = el('input',{type:'text',placeholder:placeholder||''});
+    if(formData[key]) i.value = formData[key];
+    i.addEventListener('input', e => formData[key]=e.target.value);
+    return i;
+  }
+  function ta(key, placeholder) {
+    const t = el('textarea',{placeholder:placeholder||''});
+    if(formData[key]) t.value = formData[key];
+    t.addEventListener('input', e => formData[key]=e.target.value);
+    return t;
+  }
+
+  if (currentStep===0) {
+    card.appendChild(el('h2',{style:{fontSize:'18px',fontWeight:'600',marginBottom:'24px'}},'🏢 Sobre o negócio'));
+    card.appendChild(field('Nome do negócio *','',inp('nome','Ex: Empadão da Carol')));
+    card.appendChild(field('Segmento / nicho *','Quanto mais específico, melhor o agente',inp('segmento','Ex: Alimentação — empadões artesanais delivery')));
+    card.appendChild(field('Cidade / estado *','',inp('cidade','Ex: Campo Grande, MS')));
+    const redesWrap = el('div',{style:{display:'flex',flexWrap:'wrap',gap:'8px'}});
+    REDES.forEach(r => {
+      const t = el('button',{class:'tag'+(formData.redes.includes(r)?' active':'')},r);
+      t.addEventListener('click', () => {
+        formData.redes = formData.redes.includes(r)?formData.redes.filter(x=>x!==r):[...formData.redes,r];
+        t.className='tag'+(formData.redes.includes(r)?' active':'');
+      });
+      redesWrap.appendChild(t);
+    });
+    card.appendChild(field('Redes sociais ativas','',redesWrap));
+  }
+  else if (currentStep===1) {
+    card.appendChild(el('h2',{style:{fontSize:'18px',fontWeight:'600',marginBottom:'24px'}},'📦 Produtos e serviços'));
+    [['p1','Produto / serviço 1 *'],['p2','Produto / serviço 2'],['p3','Produto / serviço 3'],['p4','Produto / serviço 4'],['p5','Produto / serviço 5']].forEach(([k,l])=>card.appendChild(field(l,'',inp(k,'Ex: Empadão Frango com Requeijão (G) — R$45'))));
+    card.appendChild(field('Carro-chefe *','O produto que mais vende ou deve ser priorizado',inp('carro_chefe','Ex: Empadão Frango com Requeijão tamanho G')));
+    card.appendChild(field('Diferencial competitivo','',ta('diferencial','Ex: Massa folhada artesanal, feita no dia, sem conservantes')));
+  }
+  else if (currentStep===2) {
+    card.appendChild(el('h2',{style:{fontSize:'18px',fontWeight:'600',marginBottom:'24px'}},'👥 Público-alvo'));
+    card.appendChild(field('Perfil principal *','Idade, gênero, situação de vida, localização',ta('perfil','Ex: Mulheres de 28 a 50 anos, mães, trabalhadoras, moram em Campo Grande, classe B/C')));
+    card.appendChild(field('Dores e desejos *','',ta('dores','Ex: Não têm tempo para cozinhar, querem comida gostosa e sem culpa, buscam praticidade')));
+    card.appendChild(field('Como descobre a marca','',inp('canais','Ex: Indicação de amigas, Instagram, grupos de WhatsApp do bairro')));
+  }
+  else if (currentStep===3) {
+    card.appendChild(el('h2',{style:{fontSize:'18px',fontWeight:'600',marginBottom:'24px'}},'🗣️ Tom de voz'));
+    card.appendChild(field('Personalidade da marca *','3 adjetivos que definem a marca',inp('personalidade','Ex: Acolhedora, divertida e confiante')));
+    card.appendChild(field('Como a marca fala *','',ta('como_fala','Ex: Tuteia, usa emojis com moderação, linguagem simples e próxima, nunca formal demais')));
+    card.appendChild(field('O que a marca nunca faz','',inp('proibicoes','Ex: Nunca fala mal de concorrentes, nunca promete o que não pode cumprir')));
+    card.appendChild(field('Exemplo de frase no tom certo','',inp('exemplo','Ex: Fome bateu? A Carol já deixou o empadão prontinho pra você 🥧')));
+  }
+  else if (currentStep===4) {
+    card.appendChild(el('h2',{style:{fontSize:'18px',fontWeight:'600',marginBottom:'24px'}},'🎯 Objetivos e metas'));
+    card.appendChild(field('Objetivo principal *','',inp('obj_principal','Ex: Aumentar pedidos via WhatsApp')));
+    card.appendChild(field('Objetivo secundário','',inp('obj_secundario','Ex: Crescer seguidores no Instagram e construir autoridade local')));
+    card.appendChild(field('Meta em 30 dias *','Um número concreto que define sucesso',inp('meta_30','Ex: 80 pedidos no mês / 500 novos seguidores / 3 posts por semana')));
+  }
+
+  function canNext() {
+    if(currentStep===0) return formData.nome && formData.segmento && formData.cidade;
+    if(currentStep===1) return formData.p1 && formData.carro_chefe;
+    if(currentStep===2) return formData.perfil && formData.dores;
+    if(currentStep===3) return formData.personalidade && formData.como_fala;
+    if(currentStep===4) return formData.obj_principal && formData.meta_30;
+    return true;
+  }
+
+  const nav = el('div',{style:{display:'flex',justifyContent:'space-between',marginTop:'28px',gap:'10px'}});
+  if (currentStep>0) {
+    const b = el('button',{class:'btn-secondary'},'← Voltar');
+    b.addEventListener('click',()=>{currentStep--;renderApp();});
+    nav.appendChild(b);
+  } else {
+    nav.appendChild(el('div',{}));
+  }
+
+  if (currentStep<4) {
+    const b = el('button',{class:'btn-primary'},'Continuar →');
+    b.addEventListener('click',()=>{ if(canNext()){currentStep++;renderApp();} else alert('Preencha os campos obrigatórios (*)'); });
+    nav.appendChild(b);
+  } else {
+    const b = el('button',{style:{padding:'11px 28px',borderRadius:'8px',fontSize:'14px',fontWeight:'700',background:'linear-gradient(135deg,#F59E0B,#EF4444)',border:'none',color:'#000',cursor:'pointer'}},'✨ Gerar Agente');
+    b.addEventListener('click',()=>{ if(canNext()){currentView='generating';renderApp();generateAgent();} else alert('Preencha os campos obrigatórios (*)'); });
+    nav.appendChild(b);
+  }
+
+  card.appendChild(nav);
+  wrap.appendChild(card);
+  return wrap;
+}
+
+// GENERATING VIEW
+function viewGenerating() {
+  const wrap = el('div',{style:{maxWidth:'660px',margin:'0 auto',padding:'32px 20px',textAlign:'center'}});
+  wrap.append(
+    el('div',{class:'spinner',style:{marginBottom:'20px'}}),
+    el('h2',{style:{fontSize:'18px',fontWeight:'600',marginBottom:'8px'}},'Criando o agente exclusivo...'),
+    el('p',{style:{fontSize:'14px',color:'rgba(255,255,255,0.4)'}},'Analisando o negócio de '+formData.nome+' e escrevendo o agente personalizado')
+  );
+  return wrap;
+}
+
+async function generateAgent() {
+  const prods = ['p1','p2','p3','p4','p5'].map((k,i)=>formData[k]?`${i+1}. ${formData[k]}`:'').filter(Boolean).join('\n');
+  const prompt = `Você é especialista em criação de agentes de IA para marketing digital.
+
+Crie um SYSTEM PROMPT completo, profissional e EXCLUSIVO para o seguinte negócio. NÃO use templates genéricos — escreva tudo de forma específica, como se você conhecesse esse negócio há anos.
+
+DADOS:
+Negócio: ${formData.nome} | Segmento: ${formData.segmento} | Cidade: ${formData.cidade} | Redes: ${(formData.redes||[]).join(', ')||'Instagram'}
+Produtos: ${prods}
+Carro-chefe: ${formData.carro_chefe} | Diferencial: ${formData.diferencial||'não informado'}
+Público: ${formData.perfil} | Dores: ${formData.dores} | Canais: ${formData.canais||'redes sociais'}
+Tom: ${formData.personalidade} | Como fala: ${formData.como_fala} | Proibições: ${formData.proibicoes||'nenhuma específica'}
+Exemplo de frase: "${formData.exemplo||'não fornecido'}"
+Objetivo principal: ${formData.obj_principal} | Secundário: ${formData.obj_secundario||'construir autoridade'} | Meta 30 dias: ${formData.meta_30}
+
+REGRAS:
+- Escreva o agente com PERSONALIDADE REAL, não robótica
+- Inclua exemplos concretos de frases no tom da marca
+- Defina pilares de conteúdo específicos para este nicho e objetivos
+- CTAs específicos para o negócio (não genéricos)
+- O agente deve soar como alguém que vive naquele negócio
+- Pronto para colar direto no Claude Projects
+- Português brasileiro
+- Seja específico, rico em detalhes e exclusivo`;
+
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key':apiKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body:JSON.stringify({model:'claude-opus-4-5',max_tokens:2000,messages:[{role:'user',content:prompt}]})
+    });
+    const d = await r.json();
+    if(d.error) throw new Error(d.error.message);
+    const text = d.content?.map(b=>b.text||'').join('') || 'Erro ao gerar.';
+    const newClient = {id:Date.now(),createdAt:new Date().toISOString(),data:{...formData},agent:text};
+    clients = [newClient, ...clients];
+    saveClients();
+    selectedClient = newClient;
+    currentView = 'detail';
+    renderApp();
+  } catch(e) {
+    selectedClient = {id:Date.now(),createdAt:new Date().toISOString(),data:{...formData},agent:'❌ Erro: '+e.message+'\n\nVerifique sua API Key nas configurações (botão ⚙️).'};
+    currentView = 'detail';
+    renderApp();
+  }
+}
+
+// DETAIL VIEW
+function viewDetail() {
+  const c = selectedClient;
+  const wrap = el('div',{class:'fade',style:{maxWidth:'660px',margin:'0 auto',padding:'32px 20px'}});
+
+  const topBar = el('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'28px'}});
+  const backBtn = el('button',{class:'btn-secondary',style:{padding:'8px 16px',fontSize:'13px'}},'← Voltar');
+  backBtn.addEventListener('click',()=>{currentView='dashboard';renderApp();});
+  const delBtn = el('button',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.2)',color:'#EF4444',borderRadius:'8px',padding:'7px 14px',fontSize:'12px'}},'🗑 Remover');
+  delBtn.addEventListener('click',()=>{if(confirm('Remover '+c.data.nome+'?')){clients=clients.filter(x=>x.id!==c.id);saveClients();currentView='dashboard';renderApp();}});
+  topBar.append(backBtn,delBtn);
+  wrap.appendChild(topBar);
+
+  const card = el('div',{class:'card',style:{padding:'24px'}});
+
+  const seg = (c.data.segmento||'').toLowerCase();
+  const ico = seg.includes('ali')||seg.includes('empad')?'🍽️':seg.includes('bel')||seg.includes('est')?'💅':seg.includes('pet')?'🐾':'🏢';
+  const header = el('div',{style:{display:'flex',alignItems:'flex-start',gap:'14px',marginBottom:'20px'}});
+  const avatar = el('div',{style:{width:'44px',height:'44px',borderRadius:'10px',background:'rgba(245,158,11,0.15)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'22px',flexShrink:'0'}},ico);
+  const info = el('div',{});
+  info.append(
+    el('h1',{style:{fontSize:'20px',fontWeight:'700'}},c.data.nome),
+    el('p',{style:{fontSize:'13px',color:'rgba(255,255,255,0.4)',marginTop:'2px'}},c.data.segmento+' · '+c.data.cidade),
+    el('p',{style:{fontSize:'11px',color:'rgba(255,255,255,0.25)',marginTop:'2px'}},'Criado em '+new Date(c.createdAt).toLocaleDateString('pt-BR'))
+  );
+  header.append(avatar,info);
+  card.appendChild(header);
+
+  const grid = el('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'20px'}});
+  [['Carro-chefe',c.data.carro_chefe],['Redes',(c.data.redes||[]).join(', ')||'—'],['Objetivo',c.data.obj_principal],['Meta 30 dias',c.data.meta_30]].forEach(([k,v])=>{
+    const box = el('div',{style:{background:'rgba(255,255,255,0.04)',borderRadius:'8px',padding:'10px 12px'}});
+    box.append(el('p',{style:{fontSize:'11px',color:'rgba(255,255,255,0.35)',marginBottom:'4px',textTransform:'uppercase',letterSpacing:'0.05em'}},k),el('p',{style:{fontSize:'13px',color:'rgba(255,255,255,0.8)'}},v||'—'));
+    grid.appendChild(box);
+  });
+  card.appendChild(grid);
+
+  const divider = el('div',{style:{borderTop:'1px solid rgba(255,255,255,0.06)',paddingTop:'20px'}});
+  const actionRow = el('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}});
+  actionRow.appendChild(el('h3',{style:{fontSize:'14px',fontWeight:'600'}},'System Prompt gerado'));
+
+  const btnRow = el('div',{style:{display:'flex',gap:'8px'}});
+
+  const copyBtn = el('button',{style:{padding:'5px 14px',borderRadius:'8px',fontSize:'12px',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.2)',color:A}},'📋 Copiar');
+  copyBtn.addEventListener('click',()=>{
+    navigator.clipboard.writeText(c.agent);
+    copyBtn.textContent='✓ Copiado!';
+    copyBtn.style.background='rgba(16,185,129,0.15)';
+    copyBtn.style.borderColor='rgba(16,185,129,0.3)';
+    copyBtn.style.color='#10B981';
+    setTimeout(()=>{copyBtn.textContent='📋 Copiar';copyBtn.style.background='rgba(245,158,11,0.1)';copyBtn.style.borderColor='1px solid rgba(245,158,11,0.2)';copyBtn.style.color=A;},2000);
+  });
+
+  const expBtn = el('button',{style:{padding:'5px 14px',borderRadius:'8px',fontSize:'12px',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',color:'rgba(255,255,255,0.4)'}},'⬇️ .txt');
+  expBtn.addEventListener('click',()=>{
+    const blob=new Blob([`AGENTE IA — ${c.data.nome}\nGerado em: ${new Date(c.createdAt).toLocaleDateString('pt-BR')}\n\n${c.agent}`],{type:'text/plain'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='agente_'+c.data.nome.replace(/\s+/g,'_')+'.txt';a.click();
+  });
+
+  btnRow.append(copyBtn,expBtn);
+  actionRow.appendChild(btnRow);
+  divider.appendChild(actionRow);
+  divider.appendChild(el('div',{class:'result-box'},c.agent));
+
+  const tip = el('div',{style:{marginTop:'14px',padding:'12px 14px',background:'rgba(245,158,11,0.06)',border:'1px solid rgba(245,158,11,0.15)',borderRadius:'8px'}});
+  tip.appendChild(el('p',{style:{fontSize:'12px',color:'rgba(245,158,11,0.8)',margin:'0'}},'✅ Cole o conteúdo acima nas Instruções do Projeto no Claude.ai (claude.ai → Projects → Instructions)'));
+  divider.appendChild(tip);
+  card.appendChild(divider);
+  wrap.appendChild(card);
+  return wrap;
+}
+
+// ---- ROUTER ----
+function renderApp() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if (!apiKey) { app.appendChild(viewApiSetup()); return; }
+  if (currentView==='new') { app.appendChild(viewNewClient()); return; }
+  if (currentView==='generating') { app.appendChild(viewGenerating()); return; }
+  if (currentView==='detail' && selectedClient) { app.appendChild(viewDetail()); return; }
+  app.appendChild(viewDashboard());
+}
+
+renderApp();
+</script>
+</body>
+</html>
