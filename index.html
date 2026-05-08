@@ -58,7 +58,7 @@ function mount(component) {
 }
 
 // ---- STATE ----
-let apiKey = localStorage.getItem('wvl_key') || '';
+let apiKey = localStorage.getItem('wvl_key') || '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';
 let clients = [];
 try { clients = JSON.parse(localStorage.getItem('wvl_clients') || '[]'); } catch(e) {}
 let currentView = 'dashboard';
@@ -464,3 +464,4 @@ renderApp();
 </script>
 </body>
 </html>
+
